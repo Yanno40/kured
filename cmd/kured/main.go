@@ -243,6 +243,18 @@ func drain(nodeID string) {
 	}
 }
 
+func getPostgresMasters(nodeID string) string {
+	log.Infof("Getting postgres masters on node %s", nodeID)
+	//kubectl  get po --all-namespaces -l spilo-role=master -o json | jq '.items[] | select(.spec.nodeName==nodeID) | .metadata.name+ ":" + .metadata.namespace '
+
+	getPostgresMastersCmd := exec.Command("/usr/bin/kubectl", "get", "pod", "--all-namespaces") //, "-l", "spilo-role=master", "-o", "json", "|", "jq", nodeID)
+	out, err := getPostgresMastersCmd.Output()
+	if err != nil {
+		log.Fatalf("Error invoking getPostgresMasters command: %v", err)
+	}
+	return string(out)
+}
+
 func uncordon(nodeID string) {
 	log.Infof("Uncordoning node %s", nodeID)
 	uncordonCmd := newCommand("/usr/bin/kubectl", "uncordon", nodeID)
@@ -336,6 +348,8 @@ func root(cmd *cobra.Command, args []string) {
 		log.Fatal("KURED_NODE_ID environment variable required")
 	}
 
+	postgresMaster := getPostgresMasters(nodeID)
+	log.Infof("Postgres masters list: %s", postgresMaster)
 	window, err := timewindow.New(rebootDays, rebootStart, rebootEnd, timezone)
 	if err != nil {
 		log.Fatalf("Failed to build time window: %v", err)
