@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -243,16 +244,41 @@ func drain(nodeID string) {
 	}
 }
 
-func getPostgresMasters(nodeID string) string {
-	log.Infof("Getting postgres masters on node %s", nodeID)
+func getPostgresMasters(nodeID string) []byte {
+	log.Infof("Getting postgres masters on node ")
 	//kubectl  get po --all-namespaces -l spilo-role=master -o json | jq '.items[] | select(.spec.nodeName==nodeID) | .metadata.name+ ":" + .metadata.namespace '
-
-	getPostgresMastersCmd := exec.Command("/usr/bin/kubectl", "get", "pod", "--all-namespaces") //, "-l", "spilo-role=master", "-o", "json", "|", "jq", nodeID)
+	cmd := "kubectl  get po --all-namespaces -l spilo-role=master -o json | jq '.items[] | select(.spec.nodeName==\"" + nodeID + "\") | .metadata.name +\":\"+.metadata.namespace'"
+	fmt.Println(cmd)
+	getPostgresMastersCmd := exec.Command("bash", "-c", cmd)
 	out, err := getPostgresMastersCmd.Output()
 	if err != nil {
 		log.Fatalf("Error invoking getPostgresMasters command: %v", err)
 	}
-	return string(out)
+	log.Infof("Postgres masters list: %s", string(out))
+	return out
+}
+
+func switchover(masters []byte) {
+	res := make([]string, len(masters))
+	i := 0
+	for _, master := range masters {
+		if master != 10 {
+			res[i] = res[i] + string(master)
+		} else {
+			i = i + 1
+		}
+	}
+	for j := 0; j < i; j++ {
+		r := strings.Split(res[j], ":")
+		pod, namespace := r[0], r[1]
+		cmd := "kubectl -n " + namespace + " exec " + pod + " -- patronictl -c postgres.yml switchover --force"
+		exeCmd := exec.Command("bash", "-c", cmd)
+		out, err := exeCmd.Output()
+		if err != nil {
+			log.Fatalf("Error switchover")
+		}
+		log.Infof("Switchover in progress: %s", string(out))
+	}
 }
 
 func uncordon(nodeID string) {
@@ -348,8 +374,6 @@ func root(cmd *cobra.Command, args []string) {
 		log.Fatal("KURED_NODE_ID environment variable required")
 	}
 
-	postgresMaster := getPostgresMasters(nodeID)
-	log.Infof("Postgres masters list: %s", postgresMaster)
 	window, err := timewindow.New(rebootDays, rebootStart, rebootEnd, timezone)
 	if err != nil {
 		log.Fatalf("Failed to build time window: %v", err)
@@ -360,6 +384,9 @@ func root(cmd *cobra.Command, args []string) {
 	log.Infof("Reboot Sentinel: %s every %v", rebootSentinel, period)
 	log.Infof("Blocking Pod Selectors: %v", podSelectors)
 	log.Infof("Reboot on: %v", window)
+
+	postgresMasters := getPostgresMasters(nodeID)
+	switchover(postgresMasters)
 
 	go rebootAsRequired(nodeID, window)
 	go maintainRebootRequiredMetric(nodeID)
