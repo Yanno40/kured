@@ -247,9 +247,9 @@ func drain(nodeID string) {
 func getPostgresMasters(nodeID string) []byte {
 	log.Infof("Getting postgres masters on node ")
 	//kubectl  get po --all-namespaces -l spilo-role=master -o json | jq '.items[] | select(.spec.nodeName==nodeID) | .metadata.name+ ":" + .metadata.namespace '
-	cmd := "kubectl  get po --all-namespaces -l spilo-role=master -o json | jq '.items[] | select(.spec.nodeName==\"" + nodeID + "\") | .metadata.name +\":\"+.metadata.namespace'"
+	cmd := "/usr/bin/kubectl  get po --all-namespaces -l spilo-role=master -o json | jq '.items[] | select(.spec.nodeName==\"" + nodeID + "\") | .metadata.name +\":\"+.metadata.namespace'"
 	fmt.Println(cmd)
-	getPostgresMastersCmd := exec.Command("bash", "-c", cmd)
+	getPostgresMastersCmd := exec.Command("/usr/bin/bash", "-c", cmd)
 	out, err := getPostgresMastersCmd.Output()
 	if err != nil {
 		log.Fatalf("Error invoking getPostgresMasters command: %v", err)
@@ -271,8 +271,8 @@ func switchover(masters []byte) {
 	for j := 0; j < i; j++ {
 		r := strings.Split(res[j], ":")
 		pod, namespace := r[0], r[1]
-		cmd := "kubectl -n " + namespace + " exec " + pod + " -- patronictl -c postgres.yml switchover --force"
-		exeCmd := exec.Command("bash", "-c", cmd)
+		cmd := "/usr/bin/kubectl -n " + namespace + " exec " + pod + " -- patronictl -c postgres.yml switchover --force"
+		exeCmd := exec.Command("/usr/bin/bash", "-c", cmd)
 		out, err := exeCmd.Output()
 		if err != nil {
 			log.Fatalf("Error switchover")
@@ -354,6 +354,8 @@ func rebootAsRequired(nodeID string, window *timewindow.TimeWindow) {
 
 			if acquire(lock, &nodeMeta) {
 				if !nodeMeta.Unschedulable {
+					postgresMasters := getPostgresMasters(nodeID)
+					switchover(postgresMasters)
 					drain(nodeID)
 				}
 				commandReboot(nodeID)
@@ -384,9 +386,6 @@ func root(cmd *cobra.Command, args []string) {
 	log.Infof("Reboot Sentinel: %s every %v", rebootSentinel, period)
 	log.Infof("Blocking Pod Selectors: %v", podSelectors)
 	log.Infof("Reboot on: %v", window)
-
-	postgresMasters := getPostgresMasters(nodeID)
-	switchover(postgresMasters)
 
 	go rebootAsRequired(nodeID, window)
 	go maintainRebootRequiredMetric(nodeID)
