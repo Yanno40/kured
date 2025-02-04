@@ -14,4 +14,3 @@ steps:
       - echo "Testing ..."
       - whoami
       - chmod a+x ./executable
-      - ./executable
